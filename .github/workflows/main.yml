@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D BIM & BOQ Engine - บ้านครอบครัวไทยร่วมสมัย 3</title>
+    <style>
+        body { margin: 0; overflow: hidden; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #1a1a24; color: #fff; }
+        #canvas-container { width: 100vw; height: 100vh; position: absolute; top: 0; left: 0; z-index: 1; }
+        #ui-panel {
+            position: absolute; top: 15px; left: 15px; z-index: 10;
+            background: rgba(0, 0, 0, 0.85);
+            padding: 20px; border-radius: 10px;
+            box-shadow: 0 6px 15px rgba(0,0,0,0.5);
+            width: 360px; max-height: 90vh; overflow-y: auto;
+            border: 1px solid #444;
+        }
+        h3 { margin-top: 0; color: #4CAF50; border-bottom: 2px solid #4CAF50; padding-bottom: 8px; font-size: 18px; }
+        h4 { margin: 12px 0 6px 0; color: #FF9800; font-size: 15px; }
+        .info-item { margin-bottom: 6px; font-size: 13px; display: flex; justify-content: space-between; }
+        .info-item span { color: #00bcd4; font-weight: bold; }
+        .boq-box { background: rgba(255,255,255,0.08); padding: 10px; border-radius: 6px; margin-top: 8px; }
+        .hint { font-size: 11px; color: #aaa; margin-top: 15px; text-align: center; border-top: 1px solid #444; padding-top: 8px; }
+    </style>
+    <!-- โหลด Three.js และ OrbitControls -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+</head>
+<body>
+
+    <div id="ui-panel">
+        <h3>ระบบถอดแบบโครงสร้าง 3D & BOQ</h3>
+        <div class="info-item">แบบบ้าน: <span>ครอบครัวไทยร่วมสมัย 3</span></div>
+        <div class="info-item">กำลังคอนกรีต: <span>Fc' = 210 ksc</span></div>
+
+        <div class="boq-box">
+            <h4>1. รายงาน BOQ: เสา C1 (ชั้น 1)</h4>
+            <div class="info-item">ปริมาตรคอนกรีต: <span id="col-conc">0</span> ลบ.ม.</div>
+            <div class="info-item">เหล็กแกนหลัก (SD40): <span id="col-main">0</span> กก.</div>
+            <div class="info-item">เหล็กปลอก (SR24): <span id="col-stirrup">0</span> กก.</div>
+        </div>
+
+        <div class="boq-box">
+            <h4>2. รายงาน BOQ: คาน B1 (ชั้น 2)</h4>
+            <div class="info-item">ปริมาตรคอนกรีต: <span id="beam-conc">0</span> ลบ.ม.</div>
+            <div class="info-item">น้ำหนักเหล็กเสริมรวม: <span id="beam-steel">0</span> กก.</div>
+        </div>
+
+        <div class="boq-box">
+            <h4>3. รายงาน BOQ: โครงหลังคาเหล็ก</h4>
+            <div class="info-item">พื้นที่ Metal Sheet: <span id="roof-area">0</span> ตร.ม.</div>
+            <div class="info-item">น้ำหนักเหล็กโครงหลังคา: <span id="roof-steel">0</span> กก.</div>
+        </div>
+
+        <div class="hint">🖱️ หมุน: คลิกซ้ายลาก | ซูม: สกรอลล์เมาส์ | เลื่อน: คลิกขวาลาก</div>
+    </div>
+
+    <div id="canvas-container"></div>
+
+    <script>
+        // ==========================================
+        // PART 1: BOQ ENGINE (JavaScript Logic)
+        // ==========================================
+        const STEEL_DENSITY = 7850.0; // kg/m^3
+
+        function calculateBarWeight(diameter_mm, length_m, count) {
+            let radius_m = (diameter_mm / 1000.0) / 2.0;
+            let area_m2 = Math.PI * Math.pow(radius_m, 2);
+            return count * length_m * area_m2 * STEEL_DENSITY;
+        }
+
+        // คำนวณเสา
+        function processColumn() {
+            let w = 0.20, d = 0.20, h = 3.15;
+            let concrete_vol = w * d * h;
+            let main_weight = calculateBarWeight(12, h + 0.50, 4); // 4-Ø12mm
+            let stirrup_perim = (2 * ((w - 0.06) + (d - 0.06))) + 0.10;
+            let num_stirrups = Math.floor(h / 0.20) + 1;
+            let stirrup_weight = calculateBarWeight(6, stirrup_perim, num_stirrups); // Ø6mm @0.20m
+
+            document.getElementById('col-conc').innerText = concrete_vol.toFixed(3);
+            document.getElementById('col-main').innerText = main_weight.toFixed(2);
+            document.getElementById('col-stirrup').innerText = stirrup_weight.toFixed(2);
+        }
+
+        // คำนวณคาน
+        function processBeam() {
+            let w = 0.20, d = 0.40, l = 3.50;
+            let concrete_vol = w * d * l;
+            let main_weight = calculateBarWeight(12, (l + 0.40) * 4, 1); // บน 2, ล่าง 2
+            let stirrup_perim = (2 * ((w - 0.06) + (d - 0.06))) + 0.10;
+            let num_stirrups = Math.floor(l / 0.20) + 1;
+            let stirrup_weight = calculateBarWeight(6, stirrup_perim, num_stirrups);
+
+            document.getElementById('beam-conc').innerText = concrete_vol.toFixed(3);
+            document.getElementById('beam-steel').innerText = (main_weight + stirrup_weight).toFixed(2);
+        }
+
+        // คำนวณหลังคา
+        function processRoof() {
+            let roof_area = 95.0;
+            let rafter_weight = 120.0 * 6.76; // เหล็กจันทัน
+            let purlin_weight = 180.0 * 5.50;  // แปเหล็ก
+            
+            document.getElementById('roof-area').innerText = roof_area.toFixed(2);
+            document.getElementById('roof-steel').innerText = (rafter_weight + purlin_weight).toFixed(2);
+        }
+
+        // รันฟังก์ชันคำนวณ BOQ
+        processColumn();
+        processBeam();
+        processRoof();
+
+
+        // ==========================================
+        // PART 2: 3D BIM VIEWER (Three.js Logic)
+        // ==========================================
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x1a1a24);
+
+        const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(14, 12, 16);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.getElementById('canvas-container').appendChild(renderer.domElement);
+
+        const controls = new THREE.OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+
+        // แสงสว่าง
+        scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+        const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        dirLight.position.set(10, 20, 10);
+        scene.add(dirLight);
+
+        // พื้นตาราง Grid
+        scene.add(new THREE.GridHelper(20, 20, 0x444444, 0x222222));
+
+        // วัสดุ 3D
+        const concreteMat = new THREE.MeshPhongMaterial({ color: 0x999999, transparent: true, opacity: 0.5 });
+        const rebarMat = new THREE.MeshBasicMaterial({ color: 0xff3333, wireframe: true });
+        const steelRoofMat = new THREE.MeshBasicMaterial({ color: 0x00aaff, wireframe: true });
+
+        function createBox(x, y, z, w, h, d, material) {
+            const geo = new THREE.BoxGeometry(w, h, d);
+            const mesh = new THREE.Mesh(geo, material);
+            mesh.position.set(x, y + h/2, z);
+            scene.add(mesh);
+            return mesh;
+        }
+
+        // วางโครงสร้างเสาและฐานรากตามพิกัดกริดแปลนบ้าน
+        const gridX = [0, 3.5, 6.5];
+        const gridZ = [0, 4.0, 6.2, 9.2];
+
+        gridX.forEach(x => {
+            gridZ.forEach(z => {
+                // ฐานราก
+                createBox(x, -0.3, z, 1.3, 0.3, 1.3, concreteMat);
+                // เสาชั้น 1
+                createBox(x, 0, z, 0.2, 3.15, 0.2, concreteMat);
+                createBox(x, 0, z, 0.14, 3.15, 0.14, rebarMat); // กรงเหล็กเสริม
+                // เสาชั้น 2
+                createBox(x, 3.75, z, 0.2, 2.90, 0.2, concreteMat);
+                createBox(x, 3.75, z, 0.14, 2.90, 0.14, rebarMat);
+            });
+        });
+
+        // สร้างคานชั้น 2
+        gridX.forEach(x => { createBox(x, 3.75, 4.6, 0.2, 0.4, 9.2, concreteMat); });
+        gridZ.forEach(z => { createBox(3.25, 3.75, z, 6.5, 0.4, 0.2, concreteMat); });
+
+        // สร้างโครงหลังคา
+        const roofHeight = 6.65;
+        for (let rZ = 0; rZ <= 9.2; rZ += 1.5) {
+            const rafterGeo = new THREE.BufferGeometry().setFromPoints([
+                new THREE.Vector3(-0.5, roofHeight, rZ),
+                new THREE.Vector3(7.0, roofHeight + 1.2, rZ)
+            ]);
+            scene.add(new THREE.Line(rafterGeo, steelRoofMat));
+        }
+
+        // Animation Loop
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update();
+            renderer.render(scene, camera);
+        }
+        animate();
+
+        // ปรับขนาดหน้าจออัตโนมัติ
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html>
